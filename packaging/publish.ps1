@@ -55,7 +55,7 @@ try {
     if ($trackedSecrets) { throw 'Refusing to publish signing secrets.' }
     git diff --cached --quiet
     if ($LASTEXITCODE -eq 1) {
-        git commit -m ("Release " + $tag + ": signed startup auto-update")
+        git commit -m ("Release " + $tag)
         if ($LASTEXITCODE -ne 0) { throw 'git commit failed.' }
     }
     git push -u origin HEAD:main

@@ -114,6 +114,29 @@ public static class MacroKeyboard {
             Press(key);
         } finally { Send(modifier, true); }
     }
+    public static Input MakeUnicodeInput(char value, bool up) {
+        Input input = new Input();
+        input.type = 1;
+        input.data.keyboard.scan = value;
+        input.data.keyboard.flags = (uint)(0x0004 | (up ? 0x0002 : 0));
+        return input;
+    }
+    private static void SendUnicode(char value, bool up) {
+        if (SendInput(1, new Input[] { MakeUnicodeInput(value, up) }, InputSize) != 1)
+            throw new InvalidOperationException("Windows rejected text input.");
+    }
+    public static void TypeElement(string text) {
+        // Keep numeric input compatible with the original game's scan-code path.
+        if (text.Length == 1 && text[0] >= '0' && text[0] <= '9') {
+            Press((ushort)(text[0] == '0' ? 0x0B : 0x02 + text[0] - '1'));
+            return;
+        }
+        foreach (char value in text) {
+            SendUnicode(value, false);
+            try { System.Threading.Thread.Sleep(20); }
+            finally { SendUnicode(value, true); }
+        }
+    }
 }
 public static class MacroApp {
     public const string Id = "Hans.ChatMacro.Desktop";
@@ -163,7 +186,7 @@ public class MacroForm : Form {
 [System.Windows.Forms.Application]::EnableVisualStyles()
 $form = New-Object MacroForm
 $form.Text = '클라이언트 반복 매크로'
-$form.ClientSize = New-Object System.Drawing.Size(760, 724)
+$form.ClientSize = New-Object System.Drawing.Size(760, 754)
 $form.StartPosition = 'CenterScreen'
 $form.FormBorderStyle = 'FixedSingle'
 $form.MaximizeBox = $false
@@ -218,12 +241,8 @@ $logo.SizeMode = 'Zoom'
 if (Test-Path -LiteralPath $imagePath) { $logo.Image = [System.Drawing.Image]::FromFile($imagePath) }
 $form.Controls.Add($logo)
 $title = Add-Text $form '클라이언트 반복 매크로' 90 18 640 38 21 $true
-$subtitle = Add-Text $form '선택한 클라만, 원하는 간격으로. Enter → 1 → Enter' 93 64 640 25 10
+$subtitle = Add-Text $form '선택한 클라만, 원하는 간격으로. Enter → 입력 내용 → Enter' 93 64 640 25 10
 $subtitle.ForeColor = $muted
-if ($env:CHATMACRO_VERSION) {
-    $versionBadge = Add-Text $form ('v' + $env:CHATMACRO_VERSION) 660 28 76 24 9
-    $versionBadge.ForeColor = $muted
-}
 
 $hotkeyOptions = [ordered]@{}
 $keyScans = [ordered]@{
@@ -246,7 +265,7 @@ $hotkeyOptions['\ (백슬래시)'] = @{ Modifier = 0; Scan = 0x2B }
 $hotkeyOptions['Scroll Lock'] = @{ Modifier = 0; Scan = 0x46 }
 $clientSettings = Add-Card 24 108 360 306
 $null = Add-Text $clientSettings '01  입력할 클라 선택' 18 16 324 28 12 $true
-$clientHeader = Add-Text $clientSettings '다른 프로그램의 개별 전환 단축키와 맞춰 주세요.' 18 49 324 24 9
+$clientHeader = Add-Text $clientSettings '고상 트레이더스의 개별 전환 단축키와 맞춰 주세요.' 18 49 324 24 9
 $clientHeader.ForeColor = $muted
 $clientChecks = @()
 $clientHotkeys = @()
@@ -369,9 +388,15 @@ $autoStop.Add_CheckedChanged({
     }
 })
 $guide = Add-Card 24 430 360 144
-$null = Add-Text $guide '사용 안내' 18 15 324 27 11 $true
-$help = Add-Text $guide "시작 Ctrl + [    /    중지 Ctrl + ]`n첫 입력은 설정한 반복 간격 뒤에 시작합니다.`n선택한 클라 처리 후 반복 시간을 셉니다.`n창 전환 전후 대기: 1초" 18 50 324 88 9
-$help.ForeColor = $muted
+$null = Add-Text $guide '입력할 내용' 18 15 324 27 11 $true
+$inputContent = New-Object System.Windows.Forms.TextBox
+$inputContent.Location = New-Object System.Drawing.Point(18, 49)
+$inputContent.Size = New-Object System.Drawing.Size(324, 30)
+$inputContent.Text = '1'
+$inputContent.MaxLength = 200
+$guide.Controls.Add($inputContent)
+$inputHint = Add-Text $guide "기본값 ‘1’은 예시입니다. 원하는 내용을 입력하세요.`nEnter → 위 입력 내용 → Enter 순서로 전송합니다." 18 88 324 44 9
+$inputHint.ForeColor = $muted
 $start = Add-Button $form '▶  시작' 24 594 232 50
 $start.BackColor = $accent
 $start.ForeColor = [System.Drawing.Color]::White
@@ -387,6 +412,34 @@ $cancelShutdown = Add-Button $form 'PC 종료 예약 취소' 504 655 232 32
 $cancelShutdown.Enabled = $false
 $autoStatus = Add-Text $form '자동 중지 시간은 시작할 때부터 계산합니다.' 27 691 706 24 9
 $autoStatus.ForeColor = $muted
+$help = Add-Text $form '시작 Ctrl + [  /  중지 Ctrl + ]  ·  창 전환 전후 대기 1초' 27 725 590 22 9
+$help.ForeColor = $muted
+$currentVersion = $env:CHATMACRO_VERSION
+if (-not $currentVersion) {
+    $versionFile = Join-Path $PSScriptRoot 'packaging\version.json'
+    if (Test-Path -LiteralPath $versionFile) {
+        $currentVersion = (Get-Content -LiteralPath $versionFile -Raw | ConvertFrom-Json).version
+    }
+}
+$versionLink = New-Object System.Windows.Forms.LinkLabel
+$versionLink.Text = if ($currentVersion) { 'v' + $currentVersion } else { '개발 버전' }
+$versionLink.Location = New-Object System.Drawing.Point(632, 725)
+$versionLink.Size = New-Object System.Drawing.Size(104, 22)
+$versionLink.TextAlign = 'MiddleRight'
+$versionLink.Font = New-Object System.Drawing.Font('맑은 고딕', 9)
+$versionLink.LinkColor = $accent
+$versionLink.ActiveLinkColor = [System.Drawing.ColorTranslator]::FromHtml('#7443A8')
+$versionLink.VisitedLinkColor = $accent
+$versionLink.LinkBehavior = 'HoverUnderline'
+$versionLink.Cursor = [System.Windows.Forms.Cursors]::Hand
+$releasePage = 'https://github.com/HansCheek/chat-macro/releases'
+$versionLink.Add_LinkClicked({
+    try { Start-Process -FilePath $releasePage -ErrorAction Stop }
+    catch { $status.Text = '● 릴리스 페이지를 열지 못했습니다' }
+})
+$form.Controls.Add($versionLink)
+$versionToolTip = New-Object System.Windows.Forms.ToolTip
+$versionToolTip.SetToolTip($versionLink, '클릭하면 깃허브 릴리즈페이지로 연결됩니다.')
 
 $script:running = $false
 $script:paused = $false
@@ -396,6 +449,8 @@ $script:client = 0
 $script:clientIndex = 0
 $script:activeClients = @()
 $script:activeHotkeys = @{}
+$script:textElements = @('1')
+$script:textIndex = 0
 $script:count = 0
 $script:period = 60000
 $script:due = 0
@@ -412,6 +467,7 @@ function Stop-Macro {
     $script:pausedAt = 0
     $autoSettings.Enabled = $true
     $clientSettings.Enabled = $true
+    $guide.Enabled = $true
     $autoStatus.Text = '자동 중지 시간은 다음 시작부터 새로 계산합니다.'
     $pause.Text = 'Ⅱ  일시정지'
     $pause.Enabled = $false
@@ -452,6 +508,20 @@ function Start-Macro {
         $status.Text = '● 입력할 클라를 하나 이상 체크하세요'
         return
     }
+    if ([string]::IsNullOrWhiteSpace($inputContent.Text)) {
+        $status.Text = '● 입력할 내용을 한 줄로 적어 주세요'
+        return
+    }
+    foreach ($character in $inputContent.Text.ToCharArray()) {
+        if ([char]::IsControl($character)) {
+            $status.Text = '● 줄바꿈 없이 한 줄로 입력해 주세요'
+            return
+        }
+    }
+    $script:textElements = @()
+    $elements = [Globalization.StringInfo]::GetTextElementEnumerator($inputContent.Text)
+    while ($elements.MoveNext()) { $script:textElements += $elements.GetTextElement() }
+    $script:textIndex = 0
     $script:activeClients = $selected
     $script:activeHotkeys = $selectedHotkeys
     $script:clientIndex = 0
@@ -470,6 +540,7 @@ function Start-Macro {
     }
     $autoSettings.Enabled = $false
     $clientSettings.Enabled = $false
+    $guide.Enabled = $false
     Update-AutoStopStatus
     $pause.Text = 'Ⅱ  일시정지'
     $pause.Enabled = $true
@@ -611,13 +682,19 @@ function Invoke-MacroStep {
         }
         1 {
             [MacroKeyboard]::Press(0x1C)
+            $script:textIndex = 0
             $script:phase = 2
             $script:due = $watch.ElapsedMilliseconds + 150
         }
         2 {
-            [MacroKeyboard]::Press(0x02)
-            $script:phase = 3
-            $script:due = $watch.ElapsedMilliseconds + 150
+            [MacroKeyboard]::TypeElement($script:textElements[$script:textIndex])
+            $script:textIndex++
+            if ($script:textIndex -ge $script:textElements.Count) {
+                $script:phase = 3
+                $script:due = $watch.ElapsedMilliseconds + 150
+            } else {
+                $script:due = $watch.ElapsedMilliseconds + 30
+            }
         }
         3 {
             [MacroKeyboard]::Press(0x1C)
@@ -675,6 +752,7 @@ $form.Add_Shown({
     $timer.Start()
 })
 $form.Add_FormClosed({
+    $versionToolTip.Dispose()
     $script:running = $false
     $timer.Stop()
     $timer.Dispose()
