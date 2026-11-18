@@ -2,6 +2,7 @@ using System;
 using System.Diagnostics;
 using System.IO;
 using System.Reflection;
+using System.Runtime.InteropServices;
 using System.Windows.Forms;
 
 [assembly: AssemblyTitle("채팅 매크로")]
@@ -10,11 +11,14 @@ using System.Windows.Forms;
 
 internal static class ChatMacroLauncher
 {
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    private static extern int SetCurrentProcessExplicitAppUserModelID(string id);
     private static readonly string[] Files = { "macro.ps1", "assets/chat-macro.png", "assets/chat-macro.ico" };
 
     [STAThread]
     private static int Main(string[] args)
     {
+        Marshal.ThrowExceptionForHR(SetCurrentProcessExplicitAppUserModelID("Hans.ChatMacro.Desktop"));
         Application.EnableVisualStyles();
         if (Array.IndexOf(args, "--updated-start") < 0)
         {
@@ -35,12 +39,7 @@ internal static class ChatMacroLauncher
         try
         {
             ExtractResources(session);
-            using (Process process = Process.Start(CreateStartInfo(session)))
-            {
-                if (process == null) throw new InvalidOperationException("매크로를 실행하지 못했습니다.");
-                process.WaitForExit();
-                return process.ExitCode;
-            }
+            return MacroRuntime.Run(session);
         }
         catch (Exception error)
         {
@@ -62,22 +61,6 @@ internal static class ChatMacroLauncher
                 using (FileStream output = File.Create(destination)) source.CopyTo(output);
             }
         }
-    }
-
-    internal static ProcessStartInfo CreateStartInfo(string directory)
-    {
-        ProcessStartInfo info = new ProcessStartInfo
-        {
-            FileName = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.System),
-                @"WindowsPowerShell\v1.0\powershell.exe"),
-            Arguments = "-NoProfile -STA -ExecutionPolicy Bypass -WindowStyle Hidden -File \"" + Path.Combine(directory, "macro.ps1") + "\"",
-            WorkingDirectory = directory,
-            UseShellExecute = false,
-            CreateNoWindow = true,
-            WindowStyle = ProcessWindowStyle.Hidden
-        };
-        info.EnvironmentVariables["CHATMACRO_VERSION"] = Assembly.GetExecutingAssembly().GetName().Version.ToString(3);
-        return info;
     }
 
     private static void Cleanup(string directory)

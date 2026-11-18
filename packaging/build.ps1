@@ -26,12 +26,15 @@ try {
     $compiler = Join-Path $env:SystemRoot 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
     if (-not (Test-Path -LiteralPath $compiler)) { $compiler = Join-Path $env:SystemRoot 'Microsoft.NET\Framework\v4.0.30319\csc.exe' }
     $executable = Join-Path $dist 'ChatMacro.exe'
+    $enginePath = (& (Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe') -NoProfile -Command '[System.Management.Automation.PSObject].Assembly.Location' | Select-Object -Last 1).Trim()
+    if (-not (Test-Path -LiteralPath $enginePath)) { throw 'Windows PowerShell runtime assembly was not found.' }
     $compilerArguments = @(
         '/nologo', '/target:winexe', '/platform:anycpu', '/optimize+', '/codepage:65001'
         ('/out:' + $executable)
         ('/win32icon:' + (Join-Path $root 'assets\chat-macro.ico'))
         ('/win32manifest:' + (Join-Path $generated 'app.manifest'))
         '/reference:System.Windows.Forms.dll', '/reference:System.Drawing.dll', '/reference:System.Web.Extensions.dll'
+        ('/reference:' + $enginePath)
         ('/resource:' + (Join-Path $root 'macro.ps1') + ',macro.ps1')
         ('/resource:' + (Join-Path $root 'assets\chat-macro.png') + ',assets/chat-macro.png')
         ('/resource:' + (Join-Path $root 'assets\chat-macro.ico') + ',assets/chat-macro.ico')
@@ -39,6 +42,7 @@ try {
         (Join-Path $generated 'Version.cs')
         (Join-Path $PSScriptRoot 'StartupUpdater.cs')
         (Join-Path $PSScriptRoot 'ChatMacroLauncher.cs')
+        (Join-Path $PSScriptRoot 'MacroRuntime.cs')
     )
     & $compiler @compilerArguments
     if ($LASTEXITCODE -ne 0) { throw 'Executable build failed.' }

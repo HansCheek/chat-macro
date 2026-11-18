@@ -761,3 +761,5 @@ $form.Add_FormClosed({
 })
 [System.Windows.Forms.Application]::Run($form)
 $form.Dispose()
+if ($logo.Image) { $logo.Image.Dispose() }
+if ($form.Icon) { $form.Icon.Dispose() }
