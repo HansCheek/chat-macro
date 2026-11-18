@@ -1,0 +1,6 @@
+dist/
+.release-secrets/
+packaging/generated/
+*.zip
+*.lnk
+*.tmp
