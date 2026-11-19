@@ -285,10 +285,11 @@ for ($slot = 0; $slot -lt 3; $slot++) {
     $combo.MaxDropDownItems = 12
     [void]$combo.Items.AddRange([object[]]@($hotkeyOptions.Keys))
     $combo.SelectedItem = $defaultHotkeys[$slot]
-    $check.Tag = $combo
+    $check.Tag = @{ Hotkey = $combo; Input = $null }
     $check.Add_CheckedChanged({
         param($sender, $eventArgs)
-        $sender.Tag.Enabled = $sender.Checked
+        $sender.Tag.Hotkey.Enabled = $sender.Checked
+        if ($null -ne $sender.Tag.Input) { $sender.Tag.Input.Enabled = $sender.Checked }
         if ($sender.Checked) { $sender.ForeColor = $accent }
         else { $sender.ForeColor = $muted }
     })
@@ -297,7 +298,7 @@ for ($slot = 0; $slot -lt 3; $slot++) {
     $clientChecks += $check
     $clientHotkeys += $combo
 }
-$clientHint = Add-Text $clientSettings '체크한 클라만 1 → 2 → 3 순서로 입력합니다.' 18 267 324 24 9
+$clientHint = Add-Text $clientSettings '체크한 클라만 순서대로 입력 · 기본값 1은 예시' 18 267 324 24 9
 $clientHint.ForeColor = $muted
 
 $repeatCard = Add-Card 404 108 332 204
@@ -388,15 +389,20 @@ $autoStop.Add_CheckedChanged({
     }
 })
 $guide = Add-Card 24 430 360 144
-$null = Add-Text $guide '입력할 내용' 18 15 324 27 11 $true
-$inputContent = New-Object System.Windows.Forms.TextBox
-$inputContent.Location = New-Object System.Drawing.Point(18, 49)
-$inputContent.Size = New-Object System.Drawing.Size(324, 30)
-$inputContent.Text = '1'
-$inputContent.MaxLength = 200
-$guide.Controls.Add($inputContent)
-$inputHint = Add-Text $guide "기본값 ‘1’은 예시입니다. 원하는 내용을 입력하세요.`nEnter → 위 입력 내용 → Enter 순서로 전송합니다." 18 88 324 44 9
-$inputHint.ForeColor = $muted
+$null = Add-Text $guide '클라별 입력할 내용' 18 12 324 27 11 $true
+$clientInputs = @()
+for ($slot = 0; $slot -lt 3; $slot++) {
+    $null = Add-Text $guide "$($slot + 1)클" 18 (45 + $slot * 30) 40 24 9
+    $clientInput = New-Object System.Windows.Forms.TextBox
+    $clientInput.Location = New-Object System.Drawing.Point(62, (43 + $slot * 30))
+    $clientInput.Size = New-Object System.Drawing.Size(280, 26)
+    $clientInput.Text = '1'
+    $clientInput.MaxLength = 200
+    $clientInput.AccessibleName = "$($slot + 1)클 입력할 내용"
+    $guide.Controls.Add($clientInput)
+    $clientInputs += $clientInput
+    $clientChecks[$slot].Tag.Input = $clientInput
+}
 $start = Add-Button $form '▶  시작' 24 594 232 50
 $start.BackColor = $accent
 $start.ForeColor = [System.Drawing.Color]::White
@@ -449,7 +455,7 @@ $script:client = 0
 $script:clientIndex = 0
 $script:activeClients = @()
 $script:activeHotkeys = @{}
-$script:textElements = @('1')
+$script:activeTextElements = @{}
 $script:textIndex = 0
 $script:count = 0
 $script:period = 60000
@@ -488,6 +494,7 @@ function Start-Macro {
     }
     $selected = @()
     $selectedHotkeys = @{}
+    $selectedTextElements = @{}
     $usedHotkeys = @()
     for ($slot = 0; $slot -lt 3; $slot++) {
         if (-not $clientChecks[$slot].Checked) { continue }
@@ -500,6 +507,21 @@ function Start-Macro {
             $status.Text = '● 선택한 클라의 전환 단축키가 중복됩니다'
             return
         }
+        $content = $clientInputs[$slot].Text
+        if ([string]::IsNullOrWhiteSpace($content)) {
+            $status.Text = "● $($slot + 1)클에 입력할 내용을 적어 주세요"
+            return
+        }
+        foreach ($character in $content.ToCharArray()) {
+            if ([char]::IsControl($character)) {
+                $status.Text = "● $($slot + 1)클 내용은 줄바꿈 없이 입력해 주세요"
+                return
+            }
+        }
+        $clientElements = @()
+        $elements = [Globalization.StringInfo]::GetTextElementEnumerator($content)
+        while ($elements.MoveNext()) { $clientElements += $elements.GetTextElement() }
+        $selectedTextElements[$slot + 1] = $clientElements
         $selected += ($slot + 1)
         $selectedHotkeys[$slot + 1] = $hotkeyOptions[$name]
         $usedHotkeys += $name
@@ -508,19 +530,7 @@ function Start-Macro {
         $status.Text = '● 입력할 클라를 하나 이상 체크하세요'
         return
     }
-    if ([string]::IsNullOrWhiteSpace($inputContent.Text)) {
-        $status.Text = '● 입력할 내용을 한 줄로 적어 주세요'
-        return
-    }
-    foreach ($character in $inputContent.Text.ToCharArray()) {
-        if ([char]::IsControl($character)) {
-            $status.Text = '● 줄바꿈 없이 한 줄로 입력해 주세요'
-            return
-        }
-    }
-    $script:textElements = @()
-    $elements = [Globalization.StringInfo]::GetTextElementEnumerator($inputContent.Text)
-    while ($elements.MoveNext()) { $script:textElements += $elements.GetTextElement() }
+    $script:activeTextElements = $selectedTextElements
     $script:textIndex = 0
     $script:activeClients = $selected
     $script:activeHotkeys = $selectedHotkeys
@@ -687,9 +697,10 @@ function Invoke-MacroStep {
             $script:due = $watch.ElapsedMilliseconds + 150
         }
         2 {
-            [MacroKeyboard]::TypeElement($script:textElements[$script:textIndex])
+            $clientText = $script:activeTextElements[$script:client]
+            [MacroKeyboard]::TypeElement($clientText[$script:textIndex])
             $script:textIndex++
-            if ($script:textIndex -ge $script:textElements.Count) {
+            if ($script:textIndex -ge $clientText.Count) {
                 $script:phase = 3
                 $script:due = $watch.ElapsedMilliseconds + 150
             } else {
